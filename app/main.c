@@ -2,8 +2,6 @@
 #include <stdio.h>
 #include <tusb.h>
 
-#include <hardware/rtc.h>
-
 #include "backlight.h"
 #include "debug.h"
 #include "gpioexp.h"
@@ -27,13 +25,11 @@ static void gpio_irq(uint gpio, uint32_t events)
 int main(void)
 {
 	// The here order is important because it determines callback call order
-	usb_init();
+	// usb_init();
 
 #ifndef NDEBUG
 	debug_init();
 #endif
-
-	rtc_init();
 
 	reg_init();
 

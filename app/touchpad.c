@@ -52,12 +52,6 @@ static uint8_t read_register8(uint8_t reg)
 	return val;
 }
 
-//static void write_register8(uint8_t reg, uint8_t val)
-//{
-//	uint8_t buffer[2] = { reg, val };
-//	i2c_write_blocking(self.i2c, DEV_ADDR, buffer, sizeof(buffer), false);
-//}
-
 int64_t release_key(alarm_id_t id, void *user_data)
 {
 	(void)id;
@@ -87,13 +81,13 @@ void touchpad_gpio_irq(uint gpio, uint32_t events)
 
 		if (self.callbacks) {
 			struct touch_callback *cb = self.callbacks;
-
 			while (cb) {
 				cb->func(x, y);
-
 				cb = cb->next;
 			}
 		}
+	} else if (motion & BIT_MOTION_OVF) {
+		printf("overflow!");
 	}
 }
 
