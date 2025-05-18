@@ -16,6 +16,8 @@ add_executable(firmware
 	pi.c
 	rtc.c
 	update.c
+	esp32/esp32_comm.c
+	esp32/esp32_flash.c
 )
 
 add_compile_options(-Wall -Wextra -Wpedantic)
@@ -45,7 +47,7 @@ pico_add_hex_output(firmware)
 
 # binary info in flash
 pico_set_program_name(firmware "I2C Puppet")
-pico_set_program_version(firmware "3.0")
+pico_set_program_version(firmware "3.1")
 
 # printf targets
 pico_enable_stdio_uart(firmware 1)

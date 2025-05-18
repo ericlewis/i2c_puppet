@@ -15,6 +15,10 @@
 #include "usb.h"
 #include "pi.h"
 
+#if ENABLE_ESP32_SUPPORT
+#include "esp32/esp32_comm.h"
+#endif
+
 // since the SDK doesn't support per-GPIO irq, we use this global irq and forward it
 static void gpio_irq(uint gpio, uint32_t events)
 {
@@ -54,6 +58,10 @@ int main(void)
 
 	led_init();
 	pi_power_init();
+
+#if ENABLE_ESP32_SUPPORT
+    esp32_auto_detect();
+#endif
 
 	pi_power_on(POWER_ON_FW_INIT);
 

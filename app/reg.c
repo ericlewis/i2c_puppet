@@ -12,6 +12,11 @@
 #include "rtc.h"
 #include "update.h"
 
+#if ENABLE_ESP32_SUPPORT
+#include "esp32/esp32_comm.h"
+#include "esp32/esp32_flash.h"
+#endif
+
 #include <pico/stdlib.h>
 #include <RP2040.h> // TODO: When there's more than one RP chip, change this to be more generic
 #include <stdio.h>
@@ -212,6 +217,38 @@ void reg_process_packet(uint8_t in_reg, uint8_t in_data, uint8_t *out_buffer, ui
 		break;
 	}
 
+	case REG_ID_UPDATE_TARGET:
+	{
+		if (is_write) {
+			update_set_target_platform(in_data);
+		} else {
+			out_buffer[0] = update_get_target_platform();
+			*out_len = sizeof(uint8_t);
+		}
+		break;
+	}
+
+#if ENABLE_ESP32_SUPPORT
+	case REG_ID_ESP32_STATUS:
+	{
+		if (!is_write) {
+			out_buffer[0] = esp32_is_connected() ? 0x03 : 0x01;
+			*out_len = sizeof(uint8_t);
+		}
+		break;
+	}
+
+	case REG_ID_ESP32_COMMAND:
+	{
+		if (is_write) {
+			if (esp32_is_connected()) {
+				esp32_send_command(in_data, NULL, 0);
+			}
+		}
+		break;
+	}
+#endif
+
 	case REG_ID_UPDATE_DATA:
 	{
 		if (is_write) {
@@ -228,16 +265,18 @@ void reg_process_packet(uint8_t in_reg, uint8_t in_data, uint8_t *out_buffer, ui
 
 				reg_set_value(REG_ID_UPDATE_DATA, UPDATE_OFF);
 
-				// Send shutdown signal to OS
+			if (update_get_target_platform() == UPDATE_TARGET_RP2040) {
 				keyboard_inject_power_key();
 
-				// Power off with grace time to give Pi time to shut down
 				uint32_t shutdown_grace_ms = MAX(
 					reg_get_value(REG_ID_SHUTDOWN_GRACE) * 1000,
 					MINIMUM_SHUTDOWN_GRACE_MS);
 				pi_schedule_power_off(shutdown_grace_ms);
 				add_alarm_in_ms(shutdown_grace_ms + 10,
 					update_commit_alarm_callback, NULL, true);
+			} else {
+				update_commit_and_reboot();
+			}
 			}
 
 		} else {

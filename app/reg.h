@@ -50,7 +50,9 @@ enum reg_id
 	REG_ID_STARTUP_REASON = 0x2E, // Why the Pi was started (see `power_on_reason` in pi.h)
 
 	REG_ID_UPDATE_DATA = 0x30, // Write HEX data to start firmware update mode
-	// Read to get update mode (off, receiving, failed)
+	REG_ID_UPDATE_TARGET = 0x31, // Target platform for firmware update (RP2040/ESP32)
+	REG_ID_ESP32_STATUS = 0x32,  // ESP32 status register (presence, connection state)
+	REG_ID_ESP32_COMMAND = 0x33, // ESP32 command register
 
 	REG_ID_LAST,
 };

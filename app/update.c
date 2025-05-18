@@ -5,10 +5,19 @@
 #include <hardware/flash.h>
 #include <hardware/watchdog.h>
 #include <hardware/structs/watchdog.h>
+#include <stdio.h>
 
 #include <flashloader.h>
 
 #include "update.h"
+#include "app_config.h"
+
+#if ENABLE_ESP32_SUPPORT
+#include "esp32/esp32_flash.h"
+#endif
+
+// Target platform for updates
+static uint8_t update_target_platform = UPDATE_TARGET_RP2040; // Default to RP2040
 
 // See https://github.com/rhulme/pico-flashloader/blob/master/app.c
 struct hex_record
@@ -174,103 +183,132 @@ static struct hex_record update_record;
 static size_t flashbuf_offset = 0;
 static uint8_t update_reading_header = 0;
 
-void update_init()
+uint8_t update_get_target_platform(void)
 {
-	update_line_idx = 0;
-	update_line[0] = '\0';
-	flashbuf_offset = 0;
-	update_reading_header = 0;
+    return update_target_platform;
+}
+
+void update_set_target_platform(uint8_t platform)
+{
+    if (platform == UPDATE_TARGET_RP2040 
+#if ENABLE_ESP32_SUPPORT
+        || platform == UPDATE_TARGET_ESP32
+#endif
+    ) {
+        update_target_platform = platform;
+#ifndef NDEBUG
+        printf("Update target platform set to %d\r\n", platform);
+#endif
+    }
+}
+
+void update_init(void)
+{
+    if (update_target_platform == UPDATE_TARGET_RP2040) {
+        update_line_idx = 0;
+        update_line[0] = '\0';
+        flashbuf_offset = 0;
+        update_reading_header = 0;
+    }
+#if ENABLE_ESP32_SUPPORT
+    else if (update_target_platform == UPDATE_TARGET_ESP32) {
+        esp32_flash_init();
+    }
+#endif
 }
 
 int update_recv(uint8_t b)
 {
-	int rc;
+    if (update_target_platform == UPDATE_TARGET_RP2040) {
+        int rc;
 
-	// Header resets update state
-	if (b == '+') {
-		update_init();
-		update_reading_header = 1;
-		return 1;
+        if (b == '+') {
+            update_init();
+            update_reading_header = 1;
+            return 1;
 
-	// Check for line terminator
-	} else if ((b == '\n') || (b == '\r')) {
-		b = '\0';
-	}
+        } else if ((b == '\n') || (b == '\r')) {
+            b = '\0';
+        }
 
-	// Ignore header contents up to end of line
-	if (update_reading_header) {
-		if (b == '\0') {
-			update_reading_header = 0;
-		}
-		return 1;
-	}
+        if (update_reading_header) {
+            if (b == '\0') {
+                update_reading_header = 0;
+            }
+            return 1;
+        }
 
-	// Check for line overflow
-	if (update_line_idx == sizeof(update_line)) {
-		return -UPDATE_FAILED_LINE_OVERFLOW;
-	}
+        if (update_line_idx == sizeof(update_line)) {
+            return -UPDATE_FAILED_LINE_OVERFLOW;
+        }
 
-	// Set next character
-	update_line[update_line_idx++] = b;
+        update_line[update_line_idx++] = b;
 
-	// If line wasn't done, read more
-	if (b) {
-		return 1;
-	}
+        if (b) {
+            return 1;
+        }
 
-	// Ignore empty line
-	if (update_line[0] == '\0') {
+        if (update_line[0] == '\0') {
 
-		// Reset to beginning of line buffer
-		update_line_idx = 0;
+            update_line_idx = 0;
 
-		return 1;
-	}
+            return 1;
+        }
 
-	// Process incoming line
-	if ((rc = process_hex_record(update_line, &update_record)) < 0) {
-		return rc;
-	}
+        if ((rc = process_hex_record(update_line, &update_record)) < 0) {
+            return rc;
+        }
 
-	// Reset to beginning of line buffer
-	update_line_idx = 0;
-	update_line[0] = '\0';
+        update_line_idx = 0;
+        update_line[0] = '\0';
 
-	switch (update_record.type) {
+        switch (update_record.type) {
 
-	// Copy parsed updated data into flash buffer
-	case TYPE_DATA:
-		memcpy(&flashbuf.header.data[flashbuf_offset],
-			update_record.data, update_record.count);
-		flashbuf_offset += update_record.count;
-		if (flashbuf_offset >= FLASH_IMAGE_MAX_SIZE) {
-			return -UPDATE_FAILED_FLASH_OVERFLOW;
-		}
-		return 1;
+        case TYPE_DATA:
+            memcpy(&flashbuf.header.data[flashbuf_offset],
+                update_record.data, update_record.count);
+            flashbuf_offset += update_record.count;
+            if (flashbuf_offset >= FLASH_IMAGE_MAX_SIZE) {
+                return -UPDATE_FAILED_FLASH_OVERFLOW;
+            }
+            return 1;
 
-	// Complete firmware received
-	case TYPE_EOF:
-		if (flashbuf_offset == 0) {
-			return -UPDATE_FAILED_FLASH_EMPTY;
-		}
+        case TYPE_EOF:
+            if (flashbuf_offset == 0) {
+                return -UPDATE_FAILED_FLASH_EMPTY;
+            }
 
-		return 0;
+            return 0;
 
-	// Reset flash buffer
-	case TYPE_EXTLIN:
-		flashbuf_offset = 0;
-		return 1;
+        case TYPE_EXTLIN:
+            flashbuf_offset = 0;
+            return 1;
 
-	// Ignore
-	case TYPE_EXTSEG:
-	case TYPE_STARTSEG:
-	case TYPE_STARTLIN:
-	default:
-		return 1;
-	}
+        case TYPE_EXTSEG:
+        case TYPE_STARTSEG:
+        case TYPE_STARTLIN:
+        default:
+            return 1;
+        }
+    }
+#if ENABLE_ESP32_SUPPORT
+    else if (update_target_platform == UPDATE_TARGET_ESP32) {
+        return esp32_flash_recv(b);
+    }
+#endif
+    else {
+        return -UPDATE_FAILED_UNSUPPORTED_PLATFORM;
+    }
 }
 
 void update_commit_and_reboot(void)
 {
-	flash_image(&flashbuf.header, flashbuf_offset);
+    if (update_target_platform == UPDATE_TARGET_RP2040) {
+        flash_image(&flashbuf.header, flashbuf_offset);
+    }
+#if ENABLE_ESP32_SUPPORT
+    else if (update_target_platform == UPDATE_TARGET_ESP32) {
+        esp32_flash_commit_and_reboot();
+    }
+#endif
 }

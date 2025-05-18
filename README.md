@@ -8,6 +8,19 @@ On the features side, this software adds USB support, the keyboard acts as a USB
 
 On the I2C side, you can access the key presses, the trackpad state, you can control some of the board GPIOs, as well as the backlight.
 
+## New Feature: ESP32 Support
+
+Starting with version 3.1, I2C Puppet now supports updating ESP32 firmware through the same I2C interface. This allows ESP32 boards with compatible pin headers to be updated using the same protocol.
+
+Key features:
+- Automatic detection of connected ESP32 boards on startup
+- Select target platform (RP2040 or ESP32) for firmware updates
+- Same Intel HEX format for firmware updates
+- Check ESP32 connectivity status
+- Send commands to the ESP32
+
+See the [ESP32 firmware README](esp32/README.md) for details on the ESP32 side implementation.
+
 See [Protocol](#protocol) for details of the I2C puppet.
 
 ## Modifications
@@ -340,16 +353,46 @@ This register can be read and written to, it is 1 byte in size.
 
 Default value: 0
 
+### Update Target Platform (REG_UPDATE_TARGET = 0x31)
+
+Starting with Beepy firmware 3.1, you can select the target platform for firmware updates. This register can be read and written to, it's 1 byte in size.
+
+Possible values:
+- `UPDATE_TARGET_RP2040 = 0x01` - Target RP2040 (default)
+- `UPDATE_TARGET_ESP32 = 0x02` - Target ESP32
+
+The selected target platform determines which device will be updated when writing to `REG_UPDATE_DATA`.
+
+### ESP32 Status Register (REG_ESP32_STATUS = 0x32)
+
+This register provides status information about the connected ESP32. It is read-only and returns 1 byte.
+
+| Bit | Name            | Description                                           |
+| --- |:---------------:| -----------------------------------------------------:|
+| 0   | ESP32_INIT      | ESP32 communication is initialized                    |
+| 1   | ESP32_CONNECTED | ESP32 is connected and responding to commands         |
+| 2-7 | Reserved        | Reserved for future use                               |
+
+### ESP32 Command Register (REG_ESP32_COMMAND = 0x33)
+
+This register allows sending commands directly to the ESP32. It is write-only, 1 byte in size.
+
+Commands will only be processed if the ESP32 is connected (check `REG_ESP32_STATUS`).
+
 ### Firmware update (REG_UPDATE_DATA = 0x30)
 
 Starting with Beepy firmware 3.0, firmware is loaded in two stages.
 
-The first stage is a modified version of [pico-flashloader](https://github.com/rhulme/pico-flashloader).
-It allows updates to be flashed to the second stage firmware while booted.
+For RP2040 updates:
+- The first stage is a modified version of [pico-flashloader](https://github.com/rhulme/pico-flashloader).
+- It allows updates to be flashed to the second stage firmware while booted.
+- The second stage is the actual Beepy firmware.
 
-The second stage is the actual Beepy firmware.
+For ESP32 updates:
+- The ESP32 uses its built-in OTA update mechanism.
+- The RP2040 acts as a bridge, forwarding update data to the ESP32 over UART.
 
-Reading `REG_UPDATE_DATA` will return an update status code
+Reading `REG_UPDATE_DATA` will return an update status code:
 
 - `UPDATE_OFF = 0`
 - `UPDATE_RECV = 1`
@@ -359,10 +402,13 @@ Reading `REG_UPDATE_DATA` will return an update status code
 - `UPDATE_FAILED_FLASH_OVERFLOW = 5`
 - `UPDATE_FAILED_BAD_LINE = 6`
 - `UPDATE_FAILED_BAD_CHECKSUM = 7`
+- `UPDATE_FAILED_ESP32_COMM_ERROR = 8`
+- `UPDATE_FAILED_UNSUPPORTED_PLATFORM = 9`
+- `UPDATE_ESP32_AWAITING_REBOOT = 10`
 
 Firmware updates are flashed by writing byte-by-byte to `REG_UPDATE_DATA`:
 
-- Header line beginning with `+` e.g. `+Beepy`
+- Header line beginning with `+` e.g. `+Beepy` for RP2040 or `+ESP32` for ESP32
 - Followed by the contents of an image in Intel HEX format
 
 By default, `REG_UPDATE_DATA` will be set to `UPDATE_OFF`.
@@ -370,10 +416,15 @@ After writing, `REG_UPDATE_DATA` will be set to `UPDATE_RECV` if more data is ex
 
 If the update completes successfully:
 
+For RP2040 updates:
 - `REG_UPDATE_DATA` will be set to `UPDATE_OFF`
 - Shutdown signal will be sent to the Pi
 - Delay to allow the Pi to cleanly shut down before poweroff (configurable with `REG_SHUTDOWN_GRACE`)
 - Firmware is flashed and the system is reset
+
+For ESP32 updates:
+- `REG_UPDATE_DATA` will be set to `UPDATE_ESP32_AWAITING_REBOOT`
+- ESP32 will reboot with the new firmware
 
 Please wait until the system reboots on its own before removing power.
 
